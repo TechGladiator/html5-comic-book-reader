@@ -1,7 +1,6 @@
 var images = [];
 var done = 0;
 var display = 1;
-var dir;
 var curPanel = 0;
 
 //Generic error handler
@@ -67,49 +66,45 @@ function init() {
   }
 
   // Upload file
-  window.webkitStorageInfo.requestQuota(window.TEMPORARY, 20*1024*1024, function(grantedBytes) {
-    window.webkitRequestFileSystem(window.TEMPORARY, grantedBytes, onInitFs, errorHandler);
-  }, errorHandler);
+  loadArchiveFormats(['rar', 'zip'], function() {
+    $(document).on("dragover", dragOverHandler);
+    $(document).on("drop", dropHandler);
+    console.log('init done');
+	});
 
-}
-
-function onInitFs(fs) {
-  dir = fs.root;
-  $(document).on("dragover", dragOverHandler);
-  $(document).on("drop", dropHandler);
-  console.log('onInitFs done, new');
 }
 
 function dragOverHandler(e) {
-  e.preventDefault();
+	e.originalEvent.preventDefault();
+	e.originalEvent.dataTransfer.dropEffect = "move";
 }
 
-
 function dropHandler(e) {
-  e.stopPropagation();
-  e.preventDefault();
+	e.preventDefault();
+	e.stopPropagation();
 
-  if(!e.originalEvent.dataTransfer.files) return;
-  var files = e.originalEvent.dataTransfer.files;
-  var count = files.length;
+	if(!e.originalEvent.dataTransfer.files) return;
+	var files = e.originalEvent.dataTransfer.files;
+	var count = files.length;
+ 
+ 	if(!count) return;
 
-   if(!count) return;
-
-   //Only one file allowed
-   if(count > 1) {
-     doError("You may only drop one file.");
-     return;
-   }
-
-   handleFile(files[0]);
+ 	//Only one file allowed
+ 	if(count > 1) {
+ 		doError("You may only drop one file.");
+ 		return;
+ 	}
+ 	handleFile(files[0]);
  }
 
 function doError(s) {
-  var errorBlock = "<div class='alert alert-block alert-error'>";
-  errorBlock += '<button class="close" data-dismiss="alert">&times;</button>';
-  errorBlock += "<p>"+s+"</p>";
-  errorBlock += "</div>";
-  $("#alertArea").html(errorBlock);
+	var errorBlock = `
+	<div class='alert alert-block alert-error'>
+	<button class="close" data-dismiss="alert">&times;</button>
+	<p>${s}</p>
+	</div>
+	`;
+	$("#alertArea").html(errorBlock);
 }
 
 // Dropbox support
@@ -123,98 +118,90 @@ options = {
 
 
 function handleFile(file) {
-  console.log(file);
-  zip.workerScriptsPath = "js/";
+	console.log('try to parse '+file.name);
 
-  zip.createReader(new zip.BlobReader(file), function(reader) {
-    console.log("Created reader.");
-    reader.getEntries(function(entries) {
-      console.log("Got entries.");
+	images = []; 
+	curPanel = 0;
+	$("#comicImg").attr("src","");
+	$("#buttonArea").hide();
+  $("#introText").hide();
 
-      $("#introText").hide();
+	archiveOpenFile(file, null, function(archive, err) {
+		if (archive) {
 
-      //Start a modal for our status
-      var modalString = 'Parsed the CBZ - Saving Images. This takes a <strong>long</strong> time!';
-      $("#statusModalText").html(modalString);
-      $("#statusModal").modal({keyboard:false});
+	    	var modalString = 'Parsed the CBZ - Saving Images. This takes a <b>long</b> time!';
+	    	$("#statusModalText").html(modalString);
+			$("#statusModal").modal({keyboard:false});
 
-      entries.forEach(function(entry) {
+			console.info('Uncompressing ' + archive.archive_type + ' ...');
+			// filter archive entries to files
+			let imageArchive = archive.entries.filter(e => {
+				return e.is_file;
+			});
 
-        if(!entry.directory && entry.filename.indexOf(".jpg") != -1) {
+			imageArchive.forEach(entry => {
 
-          //rewrite w/o a path
-          var cleanName = entry.filename;
-          if(cleanName.indexOf("/") >= 0) cleanName = cleanName.split("/").pop();
+				entry.readData(function(data, err) {
+					let url = URL.createObjectURL(new Blob([data]));
+					images.push(url);
 
-          dir.getFile(cleanName, {create:true}, function(file) {
-            console.log("Yes, I opened "+file.fullPath);
-            images.push({path:file.toURL(), loaded:false})
+					var perc = Math.floor(images.length/archive.entries.length*100);
+					var pString = `
+						Processing images.
+						<div class="progress progress-striped active">
+						<div class="bar" style="width: ${perc}%;"></div>
+						</div>
+					`;
+					$("#statusModalText").html(pString);
+					if(imageArchive.length === images.length) {
+						$("#statusModal").modal("hide");
+            $(".navbar ul li").show();
 
-            entry.getData(new zip.FileWriter(file), function(e) {
-              done++;
-              var perc = Math.floor((done/images.length)*100);
+            $("#prevPanel").on("click",prevPanel);
+            $(document).bind('keydown', 'left', prevPanel);
+            $(document).bind('keydown', 'k', prevPanel);
 
-              var pString = 'Processing images.';
-                  pString += '<div class="progress progress-striped active">';
-                  pString += '<div class="bar" style="width: '+perc+'%;"></div>';
-                  pString += '</div>';
-                  $("#statusModalText").html(pString);
+            $("#nextPanel").on("click",nextPanel);
+            $(document).bind('keydown', 'right', nextPanel);
+            $(document).bind('keydown', 'j', nextPanel);
 
-              for(var i=0; i<images.length; i++) {
-                if(images[i].path == file.toURL()) {
-                  images[i].loaded = true;
-                  break;
-                }
-              }
+            $("#fitVertical").on("click",fitVertical);
+            $(document).bind('keydown', 'v', fitVertical);
 
-              if(done == images.length) {
-                $("#statusModal").modal("hide");
-                $(".navbar ul li").show();
+            $("#fitHorizontal").on("click",fitHorizontal);
+            $(document).bind('keydown', 'h', fitHorizontal);
 
-                $("#prevPanel").on("click",prevPanel);
-                $(document).bind('keydown', 'left', prevPanel);
-                $(document).bind('keydown', 'k', prevPanel);
+            $("#fitBoth").on("click",fitBoth);
+            $(document).bind('keydown', 'b', fitBoth);
 
-                $("#nextPanel").on("click",nextPanel);
-                $(document).bind('keydown', 'right', nextPanel);
-                $(document).bind('keydown', 'j', nextPanel);
+            $("#fullSpread").on("click",fullSpread);
+            $(document).bind('keydown', 'f', fullSpread);
 
-                $("#fitVertical").on("click",fitVertical);
-                $(document).bind('keydown', 'v', fitVertical);
+            $("#singlePage").on("click",singleSpread);
+            $(document).bind('keydown', 's', singleSpread);
 
-                $("#fitHorizontal").on("click",fitHorizontal);
-                $(document).bind('keydown', 'h', fitHorizontal);
-
-                $("#fitBoth").on("click",fitBoth);
-                $(document).bind('keydown', 'b', fitBoth);
-
-                $("#fullSpread").on("click",fullSpread);
-                $(document).bind('keydown', 'f', fullSpread);
-
-                $("#singlePage").on("click",singleSpread);
-                $(document).bind('keydown', 's', singleSpread);
-
-                var i = null;
-                $("body").mousemove(function() {
-                    clearTimeout(i);
-                    $("#navbar").fadeIn();
-                    i = setTimeout('$("#navbar").fadeOut();', 1000);
-                }).mouseleave(function() {
-                    clearTimeout(i);
-                    $("#navbar").hide();
-                });
-
-                singleSpread();
-              }
+            var i = null;
+            $("body").mousemove(function() {
+                clearTimeout(i);
+                $("#navbar").fadeIn();
+                i = setTimeout('$("#navbar").fadeOut();', 1000);
+            }).mouseleave(function() {
+                clearTimeout(i);
+                $("#navbar").hide();
             });
-          }, errorHandler);
-        }
+
+            singleSpread();
+          }
+        });
       });
-    });
-  }, function(err) {
-    doError("Sorry, but unable to read this as a CBR file.");
-    console.dir(err);
+
+
+    } else {
+      console.error(err);
+      doError(err);
+    }
   });
+  
 }
 
 
@@ -225,7 +212,7 @@ function drawPanel(num) {
     if (num+index >= images.length || num+index < 0) {
       $(this).hide();
     } else {
-      $(this).attr("src",images[num+index].path);
+      $(this).attr("src",images[num+index]);
       $(this).show();
     }
   });
